@@ -202,10 +202,8 @@ if __name__ == "__main__":
             center_dists = pairwise_distances(final_centers)
             np.fill_diagonal(center_dists, np.inf)
             threshold = np.percentile(center_dists[center_dists < np.inf], 75)
-            print(f"簇间距离中位数阈值: {threshold:.4f}")
         else:
             threshold = np.percentile(min_dists, 75)
-            print(f"单簇阈值（50分位数）: {threshold:.4f}")
 
         new_cluster_centers = []
         predicted_labels = np.zeros(len(X_remain), dtype=int)
