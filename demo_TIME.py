@@ -111,7 +111,6 @@ if __name__ == "__main__":
     if DATASET_NAME in ['20NEWS', 'REUTERS']:
         from sklearn.preprocessing import Normalizer
         X_scaled = Normalizer(norm='l2').fit_transform(X)
-        print("已对文本数据应用 L2 归一化！")
     elif DATASET_NAME == 'STAR_1M':
         X_scaled = X
     else:
