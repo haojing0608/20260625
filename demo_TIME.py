@@ -43,8 +43,6 @@ def get_dataset(dataset_name):
         import numpy as np
         import scipy.io
         data_file = './cifar10_resnet_features.mat'
-        if not os.path.exists(data_file):
-            raise FileNotFoundError(f"找不到 {data_file}，请先运行 extract_features.py！")
         mat = scipy.io.loadmat(data_file)
         return mat['data'].astype(np.float32), mat['labels'].flatten().astype(np.int64)
     elif dataset_name == 'STAR_1M':
@@ -52,16 +50,13 @@ def get_dataset(dataset_name):
         X = df.iloc[:, :-1].values.astype(np.float32)
         y = df.iloc[:, -1].values.astype(np.int64)
         return X, y
-
     elif dataset_name == 'MNIST':
         import numpy as np
         filename = 'MNIST_full.txt'
         data = np.loadtxt(filename, delimiter=',')
         X = data[:, :-1]
         y = data[:, -1]
-        return X, y
-
- 
+        return X, y 
     elif dataset_name == 'MiniBooNE':
         import pandas as pd
         import numpy as np
@@ -103,7 +98,7 @@ if __name__ == "__main__":
 
     RL_METHOD = 'meanshift'
     DATASET_NAME = 'MNIST'
-    PCA_COMPONENTS = 15
+    PCA_COMPONENTS = 64
     SH_CLUSTERS = 100
     MAX_EPISODES = 1
     BATCH_SIZE = 8
@@ -217,8 +212,6 @@ if __name__ == "__main__":
         far_mask = min_dists > threshold
         close_mask = ~far_mask
         predicted_labels[close_mask] = nearest[close_mask]
-        print(f"近距离样本: {np.sum(close_mask)} 个")
-        print(f"远距离样本: {np.sum(far_mask)} 个")
 
         if np.sum(far_mask) > 0:
             X_far = X_remain[far_mask]
@@ -243,12 +236,10 @@ if __name__ == "__main__":
                 if np.sum(mask) > 0:
                     center = Z_far[mask].mean(axis=0)
                     new_cluster_centers.append(center)
-            print(f"  成功创建 {len(new_cluster_centers)} 个新簇")
 
         all_centers = np.vstack([final_centers, new_cluster_centers]) if new_cluster_centers else final_centers
         n_total_clusters = len(all_centers)
         true_k = len(np.unique(y))
-        print(f"\n当前总簇数: {n_total_clusters}, 真实簇数: {true_k}")
 
         y_pred_full = np.zeros(len(X_scaled), dtype=int)
 
@@ -287,8 +278,6 @@ if __name__ == "__main__":
         acc = clustering_accuracy(y_true_valid, y_pred_valid)
         nmi_score = normalized_mutual_info_score(y_true_valid, y_pred_valid)
         ari = adjusted_rand_score(y_true_valid, y_pred_valid)
-        print(f"有效样本数: {len(y_true_valid)} / {len(y)}")
-        print(f"离群点数: {np.sum(y_pred_full == -1)}")
         print(f"\n最终结果:")
         print(f"  Corrected NMI: {nmi_score:.4f}")
         print(f"  准确率 (Accuracy): {acc:.4f}")
@@ -301,12 +290,4 @@ if __name__ == "__main__":
     total_time = time.time() - start_time
     print(f"\n总运行时间: {total_time:.2f} 秒")
 
-    # 6. 记录日志
-    with open(LOG_FILE, "a", encoding="utf-8") as f:
-        f.write(f"=== 实验时间: {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')} ===\n")
-        f.write(f"数据集: {DATASET_NAME} | 样本数: {X_scaled.shape[0]} | 特征数: {X_scaled.shape[1]}\n")
-        f.write(f"[参数设置]\n  - PCA 降维组件数: {n_comp}\n  - 预聚类簇数: {n_sh_clusters}\n")
-        f.write(f"  - 方法: {RL_METHOD} | Episodes: {MAX_EPISODES} | Batch: {BATCH_SIZE}\n")
-        f.write(f"[最终状态]\n  - 选定样本数: {len(final_samples)} | 选定特征数: {len(final_features)}\n")
-        f.write(f"[评估指标]\n  - NMI: {nmi_score:.4f} | ACC: {acc:.4f} | ARI: {ari:.4f}\n")
-        f.write(f"  - 总耗时: {total_time:.2f} 秒\n" + "=" * 60 + "\n\n")
+
