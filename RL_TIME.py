@@ -210,7 +210,6 @@ class PPOAgent:
             value_loss.backward()
             torch.nn.utils.clip_grad_norm_(self.value_net.parameters(), 1.0)
             self.value_optimizer.step()
-        print(f"  policy_loss: {policy_loss.item():.4f}, value_loss: {value_loss.item():.4f}")
 
 def evaluate_clustering(X, labels):
     if len(np.unique(labels)) < 2:
@@ -307,7 +306,6 @@ class RLClustering:
             from sklearn.metrics import normalized_mutual_info_score
             y_curr = self.y_true[self.selected_samples]
             init_nmi = normalized_mutual_info_score(y_curr, self.current_labels)
-            print(f"使用前10%特征的KMeans NMI: {init_nmi:.4f}")
             self.state.nmi_history.append(init_nmi)
             self.state.jaccard_history.append(1.0)
             self.state.center_move_history.append(0.0)
@@ -335,7 +333,6 @@ class RLClustering:
             else:
                 self.selected_samples = np.unique(np.concatenate([self.selected_samples, new_samples]))
         self.state.sample_ratio = self.sample_hierarchy.get_selected_ratio()
-        print(f"    [DEBUG] add_samples 后: 总样本 {len(self.selected_samples)}, 比例 {self.state.sample_ratio:.3f}")
 
     def add_features(self, ratio):
         if self.feature_importance is not None:
