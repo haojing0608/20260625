@@ -1,5 +1,3 @@
-# -*- coding: utf-8 -*-
-# RL_Clustering.py
 import os
 import torch
 
@@ -21,21 +19,17 @@ from idec import IDEC
 from sklearn.mixture import GaussianMixture
 from sklearn.cluster import SpectralClustering, Birch
 
-
-# ==================== PPO网络 ====================
 class PolicyNetwork(nn.Module):
     def __init__(self, state_dim, hidden_dim=128):
         super(PolicyNetwork, self).__init__()
         self.fc1 = nn.Linear(state_dim, hidden_dim)
         self.fc2 = nn.Linear(hidden_dim, hidden_dim)
         self.fc3 = nn.Linear(hidden_dim, 2)
-
     def forward(self, state):
         x = F.relu(self.fc1(state))
         x = F.relu(self.fc2(x))
         action_probs = F.softmax(self.fc3(x), dim=-1)
         return action_probs
-
 
 class ValueNetwork(nn.Module):
     def __init__(self, state_dim, hidden_dim=128):
@@ -43,20 +37,16 @@ class ValueNetwork(nn.Module):
         self.fc1 = nn.Linear(state_dim, hidden_dim)
         self.fc2 = nn.Linear(hidden_dim, hidden_dim)
         self.fc3 = nn.Linear(hidden_dim, 1)
-
     def forward(self, state):
         x = F.relu(self.fc1(state))
         x = F.relu(self.fc2(x))
         value = self.fc3(x)
         return value
 
-
-# ==================== 状态定义 ====================
 class ClusteringState:
     def __init__(self, history_length=3):
         self.history_length = history_length
         self.reset()
-
     def reset(self):
         self.nmi_history = deque(maxlen=self.history_length)
         self.ari_history = deque(maxlen=self.history_length)
@@ -72,7 +62,6 @@ class ClusteringState:
         self.last_reward = 0.0
         self.mean_time = 0.0
         self.std_time = 0.01
-
     def get_state_vector(self):
         state = []
         consistency = self.consistency_history[-1] if self.consistency_history else 0
@@ -98,8 +87,6 @@ class ClusteringState:
         state.append(self.last_reward)
         return np.array(state, dtype=np.float32)
 
-
-# ==================== 奖励函数 ====================
 class RewardFunction:
     def __init__(self):
         self.quality_history = []
@@ -107,7 +94,6 @@ class RewardFunction:
         self.jaccard_history = []
         self.center_move_history = []
         self.time_history = []
-
     def compute_reward(self, state, next_state, action, time_cost):
         reward = 0
         if len(state.nmi_history) > 0 and len(next_state.nmi_history) > 0:
@@ -119,64 +105,45 @@ class RewardFunction:
             else:
                 nmi_reward = delta_nmi * 30
             reward += nmi_reward
-            print(f"   nmi: {current_nmi:.4f} -> 奖励: +{nmi_reward:.2f}")
-
         reward -= 0.2
-
         curr_const = next_state.consistency_history[-1] if len(next_state.consistency_history) > 0 else 0.0
         prev_const = state.consistency_history[-1] if len(state.consistency_history) > 0 else 0.0
         consistency_reward = curr_const - prev_const
         reward += consistency_reward
-        print(f"   邻居一致性: {consistency_reward:.4f} -> 奖励: +{consistency_reward:.2f}")
-
         current_jaccard = next_state.jaccard_history[-1] if next_state.jaccard_history else 0
         jaccard_reward = 0.0
         if current_jaccard > 0.95:
             jaccard_reward = 0.1
         reward += jaccard_reward
-        print(f"   jaccard: {jaccard_reward:.4f} -> 奖励: +{jaccard_reward:+.2f}")
-
         center_move = next_state.center_move_history[-1] if next_state.center_move_history else 1.0
         if current_nmi > 0.85 and center_move < 0.001:
             reward += 10.0
-            print(f"   >>> 完美收敛大奖励 +10.0")
-
         if len(state.time_history) > 0:
             time_mean = np.mean(list(state.time_history))
             time_ratio = time_cost / max(time_mean, 0.01)
             if time_ratio > 1.5:
                 time_penalty = min((time_ratio - 1.5) * 0.2, 0.5)
                 reward -= time_penalty
-                print(f"   time: {time_ratio:.2f}倍 -> 惩罚: -{time_penalty:.2f}")
-
-        print(f"   reward: {reward:.4f} -> 总奖励: +{reward:.2f}")
         return reward
 
-
-# ==================== 经验回放缓冲区 ====================
 class ExperienceBuffer:
     def __init__(self, capacity=1000):
         self.capacity = capacity
         self.buffer = []
         self.position = 0
-
     def push(self, state, action, reward, next_state, done):
         if len(self.buffer) < self.capacity:
             self.buffer.append(None)
         self.buffer[self.position] = (state, action, reward, next_state, done)
         self.position = (self.position + 1) % self.capacity
-
     def sample(self, batch_size):
         batch = np.random.choice(len(self.buffer), batch_size, replace=False)
         states, actions, rewards, next_states, dones = zip(*[self.buffer[i] for i in batch])
         return (np.array(states), np.array(actions),
                 np.array(rewards), np.array(next_states), np.array(dones))
-
     def __len__(self):
         return len(self.buffer)
 
-
-# ==================== PPO Agent ====================
 class PPOAgent:
     def __init__(self, state_dim, lr=3e-4, gamma=0.99, clip_epsilon=0.2, epochs=10):
         self.policy_net = PolicyNetwork(state_dim)
@@ -187,7 +154,6 @@ class PPOAgent:
         self.clip_epsilon = clip_epsilon
         self.epochs = epochs
         self.buffer = ExperienceBuffer()
-
     def select_action(self, state, epsilon=0.001):
         if np.random.random() < epsilon:
             action = np.random.choice(2)
@@ -211,7 +177,6 @@ class PPOAgent:
         except ValueError:
             action = np.random.choice(2)
         return action
-
     def update(self, batch_size=32):
         if len(self.buffer) < 1:
             return
@@ -247,8 +212,6 @@ class PPOAgent:
             self.value_optimizer.step()
         print(f"  policy_loss: {policy_loss.item():.4f}, value_loss: {value_loss.item():.4f}")
 
-
-# ==================== 聚类质量评估工具函数 ====================
 def evaluate_clustering(X, labels):
     if len(np.unique(labels)) < 2:
         return 0
@@ -258,11 +221,9 @@ def evaluate_clustering(X, labels):
         silhouette = 0
     return silhouette
 
-
 def compute_jaccard_similarity(labels1, labels2):
     from sklearn.metrics import normalized_mutual_info_score
     return normalized_mutual_info_score(labels1, labels2)
-
 
 def compute_center_movement(centers1, centers2):
     if centers1 is None or centers2 is None:
@@ -276,7 +237,6 @@ def compute_center_movement(centers1, centers2):
         distances.append(dist)
     return np.mean(distances)
 
-
 def compute_pairwise_jaccard(labels1, labels2):
     from sklearn.metrics.cluster import contingency_matrix
     import numpy as np
@@ -289,11 +249,8 @@ def compute_pairwise_jaccard(labels1, labels2):
     b_j = np.sum(c_matrix, axis=0)
     pairs_in_labels2 = np.sum(b_j * (b_j - 1))
     union = pairs_in_labels1 + pairs_in_labels2 - intersection
-
     return intersection / union if union > 0 else 0.0
 
-
-# ==================== 主RL聚类流程 ====================
 class RLClustering:
     def __init__(self, X, y_true=None, feature_importance=None, sample_hierarchy=None, method='kmeans'):
         self.X = X
@@ -360,7 +317,7 @@ class RLClustering:
     def initialize_selection(self):
         if self.feature_importance is not None:
             df = self.feature_importance
-            top_10_percent = int(len(df) * 0.2)
+            top_10_percent = int(len(df) * 0.1)
             top_features = df.head(top_10_percent)['Feature'].values
             self.selected_features = [int(f.replace('F', '')) for f in top_features]
         else:
@@ -371,9 +328,7 @@ class RLClustering:
         self.state.feature_ratio = len(self.selected_features) / self.X.shape[1]
 
     def add_samples(self):
-        new_samples = self.sample_hierarchy.select_samples_from_clusters(0.05)
-        print(
-            f"    [DEBUG] add_samples: 新选 {len(new_samples)} 个, 之前已选 {len(self.selected_samples) if self.selected_samples is not None else 0}")
+        new_samples = self.sample_hierarchy.select_samples_from_clusters(0.1)
         if len(new_samples) > 0:
             if self.selected_samples is None:
                 self.selected_samples = new_samples
@@ -408,7 +363,6 @@ class RLClustering:
         else:
             hidden_dims = [256, 128, 64]
             latent_dim = 10
-        print(f"CDC: 特征数={n_features}, 隐藏层={hidden_dims}, 潜在维度={latent_dim}")
         from cdc import CDC
         self.cdc_model = CDC(
             input_dim=n_features, n_clusters=k, latent_dim=latent_dim,
@@ -586,103 +540,45 @@ class RLClustering:
         return all_labels, self.current_centers
 
     def run_clustering_feature_gmm(self):
-        """使用 GMM 进行特征聚类"""
         X_selected = self.X[self.selected_samples][:, self.selected_features]
-
-        # 确定聚类数量
         k = len(np.unique(self.y_true))
-
-        # 限制最大聚类数
         k = min(k, X_selected.shape[0] // 10) if X_selected.shape[0] > 0 else k
-        k = max(k, 2)  # 至少2个簇
-
-        # GMM 参数
+        k = max(k, 2)  
         gmm = GaussianMixture(
             n_components=k,
             covariance_type='full',  # 'full', 'tied', 'diag', 'spherical'
             max_iter=100,
             n_init=3,
             random_state=None,
-            reg_covar=1e-6  # 防止协方差矩阵奇异
+            reg_covar=1e-6 
         )
-
-        try:
-            labels = gmm.fit_predict(X_selected)
-            centers = gmm.means_  # 均值作为簇中心
-        except Exception as e:
-            print(f"  GMM 聚类失败: {e}, 回退到 KMeans")
-            from sklearn.cluster import KMeans
-            km = KMeans(n_clusters=k, n_init=1)
-            labels = km.fit_predict(X_selected)
-            centers = km.cluster_centers_
-
+        labels = gmm.fit_predict(X_selected)
+        centers = gmm.means_  
         return labels, centers
 
     def run_clustering_sample_gmm(self, new_samples):
         if self.selected_samples is None or len(self.selected_samples) == 0:
             return self.current_labels, self.current_centers
-
         X_selected = self.X[self.selected_samples][:, self.selected_features]
         k = len(np.unique(self.y_true))
         k = min(k, X_selected.shape[0] // 10) if X_selected.shape[0] > 0 else k
         k = max(k, 2)
-
         gmm = GaussianMixture(n_components=k, covariance_type='full', n_init=3)
         labels = gmm.fit_predict(X_selected)
         centers = gmm.means_
-
         return labels, centers
-
-    def _rebuild_gmm(self, X, labels):
-        """根据聚类标签重建 GMM 模型"""
-        unique_labels = np.unique(labels)
-        n_components = len(unique_labels)
-
-        # 为每个簇拟合一个高斯分量
-        means = []
-        covariances = []
-        weights = []
-
-        for label in unique_labels:
-            mask = labels == label
-            X_cluster = X[mask]
-            if len(X_cluster) > 1:
-                means.append(np.mean(X_cluster, axis=0))
-                covariances.append(np.cov(X_cluster.T))
-                weights.append(len(X_cluster) / len(X))
-            else:
-                # 单点簇，使用小的方差
-                means.append(X_cluster[0])
-                covariances.append(np.eye(X.shape[1]) * 1e-6)
-                weights.append(1.0 / len(unique_labels))
-
-        # 归一化权重
-        weights = np.array(weights)
-        weights = weights / weights.sum()
-
-        # 创建 GMM 对象并手动设置参数
-        gmm = GaussianMixture(n_components=n_components, covariance_type='full')
-        gmm.means_ = np.array(means)
-        gmm.covariances_ = np.array(covariances)
-        gmm.weights_ = weights
-
-        return gmm
 
     def _run_pure_spectral_clustering(self):
         X_current = self.X[self.selected_samples][:, self.selected_features]
         n_samples, n_features = X_current.shape
-
-        # 2. 健壮地确定 K 值
         k = len(np.unique(self.y_true)) if hasattr(self, 'y_true') else 2
         k = min(k, n_samples - 1) if n_samples > k else k
-        k = max(k, 2)  # 至少保证2个簇
-
-        # 3. 运行标准的全局谱聚类
+        k = max(k, 2)
         spectral = SpectralClustering(
             n_clusters=k,
             affinity='rbf',
-            gamma=1.0 / max(n_features, 1),  # 防止特征为0时除零
-            random_state=42,  # 固定种子，保证动作没变时结果稳定
+            gamma=1.0 / max(n_features, 1),  
+            random_state=42,  
             assign_labels='kmeans',
             n_init=10
         )
@@ -696,17 +592,12 @@ class RLClustering:
                 centers.append(X_current[np.random.randint(0, n_samples)])
         self.current_labels = labels
         self.current_centers = np.array(centers)
-
         return self.current_labels, self.current_centers
-
     def run_clustering_feature_spectral(self):
-
         return self._run_pure_spectral_clustering()
-
     def run_clustering_sample_spectral(self, new_samples):
         if len(self.selected_samples) == 0:
             return getattr(self, 'current_labels', []), getattr(self, 'current_centers', None)
-
         return self._run_pure_spectral_clustering()
 
     def _fill_empty_cluster_center(self, X, labels, target_cluster):
@@ -732,7 +623,6 @@ class RLClustering:
         y_selected = self.y_true[self.selected_samples].astype(int)
         labels = labels.astype(int)
         nmi = normalized_mutual_info_score(y_selected, labels)
-        print(f"  计算的 NMI: {nmi:.4f}")
         self.state.nmi_history.append(nmi)
 
         def compute_neighbor_consistency(X, labels, k=10):
@@ -744,7 +634,6 @@ class RLClustering:
                 same_cluster = np.sum(labels[neighbors] == labels[i])
                 consistency += same_cluster / k
             return consistency / len(X)
-
         consistency = compute_neighbor_consistency(X_selected, labels)
         self.state.consistency_history.append(consistency)
         if hasattr(self, 'selected_samples_prev') and self.selected_samples_prev is not None:
@@ -778,13 +667,10 @@ class RLClustering:
         if self.state.iteration > 5 and self.global_best_nmi > 0.1696:
             recent_nmi = list(self.state.nmi_history)[-3:]
             if len(recent_nmi) >= 10 and all(nmi > 0.5 for nmi in recent_nmi):
-                print(f"[Done] 聚类达到目标NMI(当前最佳={self.global_best_nmi:.4f})")
                 return True
         if self.state.iteration >= 10:
-            print(f"终止条件3: 达到最大迭代次数({self.state.iteration})")
             return True
         if self.state.sample_ratio >= 0.95 and self.state.feature_ratio >= 0.95:
-            print(f"终止条件4: 样本和特征已用尽({self.state.sample_ratio:.3f})")
             return True
         return False
 
@@ -801,8 +687,6 @@ class RLClustering:
                 step_start_time = time.time()
                 state_vec = self.state.get_state_vector()
                 action = self.agent.select_action(state_vec)
-                print(
-                    f"  [DEBUG] Step {self.state.iteration}: action={action} (0=加样本, 1=加特征), 当前样本数={len(self.selected_samples) if self.selected_samples is not None else 0}")
                 import copy
                 old_state = copy.deepcopy(self.state)
                 start_time = time.time()
@@ -830,7 +714,7 @@ class RLClustering:
                     else:
                         labels, centers = self.current_labels, self.current_centers
                 else:
-                    self.add_features(0.05)
+                    self.add_features(0.1)
                     if self.method == 'dbscan':
                         labels, centers = self.run_clustering_feature_dbscan()
                     elif self.method == 'cdc':
@@ -882,19 +766,15 @@ class RLClustering:
                     callback(episode, step_count, self, algo_elapsed_time)
                 step_count += 1
                 if done:
-                    print(f"  Episode {episode + 1} 结束. 总奖励: {episode_reward:.2f}")
                     self.last_episode_features = self.selected_features.copy()
                     break
         self.state.sample_ratio = len(self.selected_samples) / self.X.shape[0]
         self.state.feature_ratio = len(self.selected_features) / self.X.shape[1]
         return self.history
 
-
-# ==================== 主函数 ====================
 if __name__ == "__main__":
     import numpy as np
     from Sample import FeatureImportancePCA, SampleHierarchy
-
     filename = 'MNIST.txt'
     data = np.loadtxt(filename, delimiter=',')
     X = data[:, :-1]
