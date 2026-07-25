@@ -25,7 +25,7 @@ import warnings
 from sklearn.preprocessing import StandardScaler
 from sklearn.metrics import normalized_mutual_info_score, adjusted_rand_score
 from Sample import FeatureImportancePCA, SampleHierarchy
-from RL_TIME_Silhouette import RLClustering
+from RL_TIME import RLClustering
 #from RL_TIME import RLClustering
 
 # 屏蔽 sklearn 的 UserWarning 和 FutureWarning
