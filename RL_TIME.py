@@ -588,35 +588,22 @@ class RLClustering:
         return all_labels, self.current_centers
 
     def run_clustering_feature_gmm(self):
-        """使用 GMM 进行特征聚类"""
         X_selected = self.X[self.selected_samples][:, self.selected_features]
-
-        # 确定聚类数量
         k = len(np.unique(self.y_true))
-
-        # 限制最大聚类数
         k = min(k, X_selected.shape[0] // 10) if X_selected.shape[0] > 0 else k
-        k = max(k, 2)  # 至少2个簇
-
-        # GMM 参数
+        k = max(k, 2)  
         gmm = GaussianMixture(
             n_components=k,
             covariance_type='full',  # 'full', 'tied', 'diag', 'spherical'
             max_iter=100,
             n_init=3,
             random_state=None,
-            reg_covar=1e-6  # 防止协方差矩阵奇异
+            reg_covar=1e-6 
         )
 
         try:
             labels = gmm.fit_predict(X_selected)
-            centers = gmm.means_  # 均值作为簇中心
-        except Exception as e:
-            print(f"  GMM 聚类失败: {e}, 回退到 KMeans")
-            from sklearn.cluster import KMeans
-            km = KMeans(n_clusters=k, n_init=1)
-            labels = km.fit_predict(X_selected)
-            centers = km.cluster_centers_
+            centers = gmm.means_ 
 
         return labels, centers
 
@@ -636,11 +623,8 @@ class RLClustering:
         return labels, centers
 
     def _rebuild_gmm(self, X, labels):
-        """根据聚类标签重建 GMM 模型"""
         unique_labels = np.unique(labels)
         n_components = len(unique_labels)
-
-        # 为每个簇拟合一个高斯分量
         means = []
         covariances = []
         weights = []
@@ -652,39 +636,30 @@ class RLClustering:
                 means.append(np.mean(X_cluster, axis=0))
                 covariances.append(np.cov(X_cluster.T))
                 weights.append(len(X_cluster) / len(X))
-            else:
-                # 单点簇，使用小的方差
+            else
                 means.append(X_cluster[0])
                 covariances.append(np.eye(X.shape[1]) * 1e-6)
                 weights.append(1.0 / len(unique_labels))
 
-        # 归一化权重
         weights = np.array(weights)
         weights = weights / weights.sum()
-
-        # 创建 GMM 对象并手动设置参数
         gmm = GaussianMixture(n_components=n_components, covariance_type='full')
         gmm.means_ = np.array(means)
         gmm.covariances_ = np.array(covariances)
         gmm.weights_ = weights
-
         return gmm
 
     def _run_pure_spectral_clustering(self):
         X_current = self.X[self.selected_samples][:, self.selected_features]
         n_samples, n_features = X_current.shape
-
-        # 2. 健壮地确定 K 值
         k = len(np.unique(self.y_true)) if hasattr(self, 'y_true') else 2
         k = min(k, n_samples - 1) if n_samples > k else k
-        k = max(k, 2)  # 至少保证2个簇
-
-        # 3. 运行标准的全局谱聚类
+        k = max(k, 2) 
         spectral = SpectralClustering(
             n_clusters=k,
             affinity='rbf',
-            gamma=1.0 / max(n_features, 1),  # 防止特征为0时除零
-            random_state=42,  # 固定种子，保证动作没变时结果稳定
+            gamma=1.0 / max(n_features, 1), 
+            random_state=42,  
             assign_labels='kmeans',
             n_init=10
         )
