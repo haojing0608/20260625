@@ -1,5 +1,3 @@
-# -*- coding: utf-8 -*-
-# RL_Clustering.py
 import os
 import torch
 
@@ -51,7 +49,6 @@ class ValueNetwork(nn.Module):
         value = self.fc3(x)
         return value
 
-
 # ==================== 状态定义 ====================
 class ClusteringState:
     def __init__(self, history_length=3):
@@ -100,48 +97,49 @@ class ClusteringState:
         state.append(self.last_reward)
         return np.array(state, dtype=np.float32)
 
-
 # ==================== 奖励函数 ====================
 class RewardFunction:
-    def __init__(self):
+    def __init__(self, ch_reward_scale=10):
+        self.ch_reward_scale = ch_reward_scale
         self.quality_history = []
         self.ch_history = []
         self.jaccard_history = []
         self.center_move_history = []
         self.time_history = []
 
-    def compute_reward(self, state, next_state, action, time_cost):
+    def compute_reward(self, state, next_state, action, time_cost, labels=None):
         reward = 0
-
-        curr_ch = next_state.ch_history[-1] if len(next_state.ch_history) > 0 else 1.0
-        prev_ch = state.ch_history[-1] if len(state.ch_history) > 0 else 1.0
-        if prev_ch > 0 and curr_ch > 0:
-            log_ratio = np.log(curr_ch / prev_ch)
-            ch_reward = log_ratio * 10
+        if labels is not None and len(np.unique(labels)) < 2:
+            ch_reward -= 10.0
         else:
-            ch_reward = 0
-
+            curr_ch = next_state.ch_history[-1] if len(next_state.ch_history) > 0 else 1.0
+            prev_ch = state.ch_history[-1] if len(state.ch_history) > 0 else 1.0
+            if prev_ch > 0 and curr_ch > 0:
+                log_ratio = np.log(curr_ch / prev_ch)
+                ch_reward = log_ratio * self.ch_reward_scale
+            else:
+                ch_reward = 0
         reward += ch_reward
-        print(f"   CH指数: {curr_ch:.1f} (log变化{log_ratio:+.3f}) -> 奖励:{ch_reward:+.2f}")
 
         reward -= 0.2
         curr_const = next_state.consistency_history[-1] if len(next_state.consistency_history) > 0 else 0.0
         prev_const = state.consistency_history[-1] if len(state.consistency_history) > 0 else 0.0
         consistency_reward = curr_const - prev_const
         reward += consistency_reward
-        print(f"   邻居一致性: {consistency_reward:.4f} -> 奖励: +{consistency_reward:.2f}")
 
         current_jaccard = next_state.jaccard_history[-1] if next_state.jaccard_history else 0
         jaccard_reward = 0.0
         if current_jaccard > 0.95:
             jaccard_reward = 0.1
         reward += jaccard_reward
-        print(f"   jaccard: {jaccard_reward:.4f} -> 奖励: +{jaccard_reward:+.2f}")
 
         center_move = next_state.center_move_history[-1] if next_state.center_move_history else 1.0
-        if curr_ch > 500 and center_move < 0.001:
-            reward += 10.0
-            print(f"   >>> 完美收敛大奖励 +10.0")
+        ch_history_list = list(next_state.ch_history)
+        if len(ch_history_list) >= 2:
+            past_ch = ch_history_list[:-1]
+            best_past_ch = max(past_ch)
+            if curr_ch >= 1.5 * best_past_ch and center_move < 0.001:
+                reward += 10.0
 
         if len(state.time_history) > 0:
             time_mean = np.mean(list(state.time_history))
@@ -149,9 +147,6 @@ class RewardFunction:
             if time_ratio > 1.5:
                 time_penalty = min((time_ratio - 1.5) * 0.2, 0.5)
                 reward -= time_penalty
-                print(f"   time: {time_ratio:.2f}倍 -> 惩罚: -{time_penalty:.2f}")
-
-        print(f"   reward: {reward:.4f} -> 总奖励: +{reward:.2f}")
         return reward
 
 
@@ -247,10 +242,8 @@ class PPOAgent:
             value_loss.backward()
             torch.nn.utils.clip_grad_norm_(self.value_net.parameters(), 1.0)
             self.value_optimizer.step()
-        print(f"  policy_loss: {policy_loss.item():.4f}, value_loss: {value_loss.item():.4f}")
 
-
-# ==================== 聚类质量评估工具函数 ====================
+# ==================== 聚类质量评估函数 ====================
 def evaluate_clustering(X, labels):
     if len(np.unique(labels)) < 2:
         return 0
@@ -260,11 +253,9 @@ def evaluate_clustering(X, labels):
         silhouette = 0
     return silhouette
 
-
 def compute_jaccard_similarity(labels1, labels2):
     from sklearn.metrics import normalized_mutual_info_score
     return normalized_mutual_info_score(labels1, labels2)
-
 
 def compute_center_movement(centers1, centers2):
     if centers1 is None or centers2 is None:
@@ -278,31 +269,28 @@ def compute_center_movement(centers1, centers2):
         distances.append(dist)
     return np.mean(distances)
 
-
 def compute_pairwise_jaccard(labels1, labels2):
     from sklearn.metrics.cluster import contingency_matrix
     import numpy as np
-
     c_matrix = contingency_matrix(labels1, labels2)
     intersection = np.sum(c_matrix * (c_matrix - 1))
-
     a_i = np.sum(c_matrix, axis=1)
     pairs_in_labels1 = np.sum(a_i * (a_i - 1))
     b_j = np.sum(c_matrix, axis=0)
     pairs_in_labels2 = np.sum(b_j * (b_j - 1))
     union = pairs_in_labels1 + pairs_in_labels2 - intersection
-
     return intersection / union if union > 0 else 0.0
-
 
 # ==================== 主RL聚类流程 ====================
 class RLClustering:
-    def __init__(self, X, y_true=None, feature_importance=None, sample_hierarchy=None, method='kmeans'):
+    def __init__(self, X, y_true=None, feature_importance=None, sample_hierarchy=None, method='kmeans', dataset_name='MNIST'):
         self.X = X
         self.y_true = y_true
         self.feature_importance = feature_importance
         self.sample_hierarchy = sample_hierarchy
         self.method = method
+        self.dataset_name = dataset_name
+        self.cfg = self._load_config()
         self.best_idec = None
         self.best_cdc = None
         self.best_features = None
@@ -312,7 +300,8 @@ class RLClustering:
             del self.idec
             self.idec = None
         self.agent = PPOAgent(state_dim=11, lr=3e-4, gamma=0.99, epochs=10)
-        self.reward_fn = RewardFunction()
+        ch_reward_scale = self.cfg.get('ch_reward_scale', 10)
+        self.reward_fn = RewardFunction(ch_reward_scale=ch_reward_scale)
         self.state = ClusteringState()
         self.global_best_ch = -1
         self.global_best_samples = None
@@ -334,6 +323,18 @@ class RLClustering:
             'time': []
         }
 
+    def _load_config(self):
+        import json
+        try:
+            with open('configs/params_registry.json', 'r', encoding='utf-8') as f:
+                registry = json.load(f)
+            method_key = self.method.lower()
+            if method_key == 'kmeans':
+                method_key = 'minibatchkmeans'
+            return registry.get(method_key, {}).get(self.dataset_name, {})
+        except Exception:
+            return {}
+
     def reset_env(self):
         if self.sample_hierarchy is not None:
             self.sample_hierarchy.selected_mask = np.zeros(self.X.shape[0], dtype=bool)
@@ -352,7 +353,6 @@ class RLClustering:
             from sklearn.metrics import normalized_mutual_info_score
             y_curr = self.y_true[self.selected_samples]
             init_ch = calinski_harabasz_score(X_selected, self.current_labels)
-            print(f"使用前10%特征的KMeans CH指数: {init_ch:.2f}")
             self.state.ch_history.append(init_ch)
             self.state.jaccard_history.append(1.0)
             self.state.center_move_history.append(0.0)
@@ -360,29 +360,29 @@ class RLClustering:
             self.state.mean_time = 0.1
 
     def initialize_selection(self):
+        init_sample_ratio = self.cfg.get('init_sample_ratio', 0.1)
+        init_feature_ratio = self.cfg.get('init_feature_ratio', 0.1)
         if self.feature_importance is not None:
             df = self.feature_importance
-            top_10_percent = int(len(df) * 0.1)
-            top_features = df.head(top_10_percent)['Feature'].values
+            top_n = int(len(df) * init_feature_ratio)
+            top_features = df.head(top_n)['Feature'].values
             self.selected_features = [int(f.replace('F', '')) for f in top_features]
         else:
             n_features = self.X.shape[1]
-            self.selected_features = np.random.choice(n_features, int(n_features * 0.1), replace=False)
-        self.selected_samples = self.sample_hierarchy.select_samples_from_clusters(0.1)
+            self.selected_features = np.random.choice(n_features, int(n_features * init_feature_ratio), replace=False)
+        self.selected_samples = self.sample_hierarchy.select_samples_from_clusters(init_sample_ratio)
         self.state.sample_ratio = len(self.selected_samples) / self.X.shape[0]
         self.state.feature_ratio = len(self.selected_features) / self.X.shape[1]
 
     def add_samples(self):
-        new_samples = self.sample_hierarchy.select_samples_from_clusters(0.05)
-        print(
-            f"    [DEBUG] add_samples: 新选 {len(new_samples)} 个, 之前已选 {len(self.selected_samples) if self.selected_samples is not None else 0}")
+        add_sample_step = self.cfg.get('add_sample_step', 0.05)
+        new_samples = self.sample_hierarchy.select_samples_from_clusters(add_sample_step)
         if len(new_samples) > 0:
             if self.selected_samples is None:
                 self.selected_samples = new_samples
             else:
                 self.selected_samples = np.unique(np.concatenate([self.selected_samples, new_samples]))
         self.state.sample_ratio = self.sample_hierarchy.get_selected_ratio()
-        print(f"    [DEBUG] add_samples 后: 总样本 {len(self.selected_samples)}, 比例 {self.state.sample_ratio:.3f}")
 
     def add_features(self, ratio):
         if self.feature_importance is not None:
@@ -410,7 +410,6 @@ class RLClustering:
         else:
             hidden_dims = [256, 128, 64]
             latent_dim = 10
-        print(f"CDC: 特征数={n_features}, 隐藏层={hidden_dims}, 潜在维度={latent_dim}")
         from cdc import CDC
         self.cdc_model = CDC(
             input_dim=n_features, n_clusters=k, latent_dim=latent_dim,
@@ -452,15 +451,8 @@ class RLClustering:
     def run_clustering_feature(self):
         X_selected = self.X[self.selected_samples][:, self.selected_features]
         k_y = len(np.unique(self.y_true))
-        mbk = MiniBatchKMeans(n_clusters=k_y, batch_size=1000)
-        labels = mbk.fit_predict(X_selected)
-        centers = mbk.cluster_centers_
-        return labels, centers
-
-    def run_clustering_feature(self):
-        X_selected = self.X[self.selected_samples][:, self.selected_features]
-        k_y = len(np.unique(self.y_true))
-        mbk = MiniBatchKMeans(n_clusters=k_y, batch_size=1000, n_init=3, max_iter=100, random_state=42)
+        batch_size = self.cfg.get('mbk_feature_batch_size', 1000)
+        mbk = MiniBatchKMeans(n_clusters=k_y, batch_size=batch_size, n_init=3, max_iter=100, random_state=42)
         labels = mbk.fit_predict(X_selected)
         centers = mbk.cluster_centers_
         return labels, centers
@@ -470,9 +462,10 @@ class RLClustering:
         k_y = len(np.unique(self.y_true))
         if self.current_centers is not None and self.current_centers.shape[1] == X_selected.shape[1] and len(
                 self.current_centers) == k_y:
-            mbk = MiniBatchKMeans(n_clusters=k_y, init=self.current_centers, n_init=1, batch_size=10240, max_iter=100)
+            batch_size = self.cfg.get('mbk_sample_batch_size', 10240)
+            mbk = MiniBatchKMeans(n_clusters=k_y, init=self.current_centers, n_init=3, batch_size=batch_size, max_iter=100)
         else:
-            mbk = MiniBatchKMeans(n_clusters=k_y, batch_size=10240, n_init=3, max_iter=100, random_state=42)
+            mbk = MiniBatchKMeans(n_clusters=k_y, batch_size=batch_size, n_init=3, max_iter=100, random_state=42)
 
         labels = mbk.fit_predict(X_selected)
         centers = mbk.cluster_centers_
@@ -525,8 +518,9 @@ class RLClustering:
         from sklearn.cluster import MeanShift, estimate_bandwidth
         X_selected = self.X[self.selected_samples][:, self.selected_features]
         X_for_fit = X_selected
-
-        bandwidth = estimate_bandwidth(X_for_fit, quantile=0.03, n_samples=min(1000, len(X_for_fit)))
+        quantile = self.cfg.get('quantile', 0.01)
+        n_samples_min = self.cfg.get('n_samples_min', 1000)
+        bandwidth = estimate_bandwidth(X_for_fit, quantile=quantile, n_samples=min(n_samples_min, len(X_for_fit)))
         ms = MeanShift(bandwidth=bandwidth, bin_seeding=True)
         ms.fit(X_for_fit)
 
@@ -552,7 +546,8 @@ class RLClustering:
             if np.sum(far_mask) > 0 and np.sum(far_mask) > 5:
                 X_far = X_new[far_mask]
                 from sklearn.cluster import MeanShift, estimate_bandwidth
-                bandwidth = estimate_bandwidth(X_far, quantile=0.03)
+                quantile = self.cfg.get('quantile', 0.01)
+                bandwidth = estimate_bandwidth(X_far, quantile=quantile)
                 if bandwidth > 0:
                     ms = MeanShift(bandwidth=bandwidth)
                     far_labels = ms.fit_predict(X_far)
@@ -591,35 +586,28 @@ class RLClustering:
         X_selected = self.X[self.selected_samples][:, self.selected_features]
         k = len(np.unique(self.y_true))
         k = min(k, X_selected.shape[0] // 10) if X_selected.shape[0] > 0 else k
-        k = max(k, 2)  
+        k = max(k, 2)
         gmm = GaussianMixture(
             n_components=k,
-            covariance_type='full',  # 'full', 'tied', 'diag', 'spherical'
+            covariance_type='full',
             max_iter=100,
             n_init=3,
             random_state=None,
-            reg_covar=1e-6 
-        )
-
-        try:
-            labels = gmm.fit_predict(X_selected)
-            centers = gmm.means_ 
-
+            reg_covar=1e-6)
+        labels = gmm.fit_predict(X_selected)
+        centers = gmm.means_
         return labels, centers
 
     def run_clustering_sample_gmm(self, new_samples):
         if self.selected_samples is None or len(self.selected_samples) == 0:
             return self.current_labels, self.current_centers
-
         X_selected = self.X[self.selected_samples][:, self.selected_features]
         k = len(np.unique(self.y_true))
         k = min(k, X_selected.shape[0] // 10) if X_selected.shape[0] > 0 else k
         k = max(k, 2)
-
         gmm = GaussianMixture(n_components=k, covariance_type='full', n_init=3)
         labels = gmm.fit_predict(X_selected)
         centers = gmm.means_
-
         return labels, centers
 
     def _rebuild_gmm(self, X, labels):
@@ -628,7 +616,6 @@ class RLClustering:
         means = []
         covariances = []
         weights = []
-
         for label in unique_labels:
             mask = labels == label
             X_cluster = X[mask]
@@ -636,11 +623,10 @@ class RLClustering:
                 means.append(np.mean(X_cluster, axis=0))
                 covariances.append(np.cov(X_cluster.T))
                 weights.append(len(X_cluster) / len(X))
-            else
+            else:
                 means.append(X_cluster[0])
                 covariances.append(np.eye(X.shape[1]) * 1e-6)
                 weights.append(1.0 / len(unique_labels))
-
         weights = np.array(weights)
         weights = weights / weights.sum()
         gmm = GaussianMixture(n_components=n_components, covariance_type='full')
@@ -654,15 +640,14 @@ class RLClustering:
         n_samples, n_features = X_current.shape
         k = len(np.unique(self.y_true)) if hasattr(self, 'y_true') else 2
         k = min(k, n_samples - 1) if n_samples > k else k
-        k = max(k, 2) 
+        k = max(k, 2)
         spectral = SpectralClustering(
             n_clusters=k,
             affinity='rbf',
-            gamma=1.0 / max(n_features, 1), 
-            random_state=42,  
+            gamma=1.0 / max(n_features, 1),
+            random_state=42,
             assign_labels='kmeans',
-            n_init=10
-        )
+            n_init=10)
         labels = spectral.fit_predict(X_current)
         centers = []
         for i in range(k):
@@ -673,17 +658,14 @@ class RLClustering:
                 centers.append(X_current[np.random.randint(0, n_samples)])
         self.current_labels = labels
         self.current_centers = np.array(centers)
-
         return self.current_labels, self.current_centers
 
     def run_clustering_feature_spectral(self):
-
         return self._run_pure_spectral_clustering()
 
     def run_clustering_sample_spectral(self, new_samples):
         if len(self.selected_samples) == 0:
             return getattr(self, 'current_labels', []), getattr(self, 'current_centers', None)
-
         return self._run_pure_spectral_clustering()
 
     def _fill_empty_cluster_center(self, X, labels, target_cluster):
@@ -707,10 +689,13 @@ class RLClustering:
         X_selected = self.X[self.selected_samples][:, self.selected_features]
         y_selected = self.y_true[self.selected_samples].astype(int)
         labels = labels.astype(int)
-        ch_score = calinski_harabasz_score(X_selected, labels)
-        print(f"计算的CH指数: {ch_score:.2f}")
-        self.state.ch_history.append(ch_score)
+        unique_labels = np.unique(labels)
+        if len(unique_labels) >= 2:
+            ch_score = calinski_harabasz_score(X_selected, labels)
+        else:
+            ch_score = 1e-3  # 单簇时给一个低分，避免崩溃
 
+        self.state.ch_history.append(ch_score)
         def compute_neighbor_consistency(X, labels, k=10):
             nbrs = NearestNeighbors(n_neighbors=min(k + 1, len(X))).fit(X)
             _, indices = nbrs.kneighbors(X)
@@ -751,16 +736,15 @@ class RLClustering:
         self.state.iteration += 1
 
     def check_termination(self):
-        if self.state.iteration > 5 and self.global_best_ch > 300:
+        target_ch = self.cfg.get('target_ch', 300)
+        if self.state.iteration > 5 and len(self.state.ch_history) >= 3:
             recent_ch = list(self.state.ch_history)[-3:]
-            if len(recent_ch) >= 3 and all(c > 200 for c in recent_ch):
-                print(f"[Done] 聚类达到目标CH指数(当前最佳={self.global_best_ch:.1f})")
+            if all(c >= 0.95 * self.global_best_ch for c in recent_ch):
                 return True
-        if self.state.iteration >= 10:
-            print(f"终止条件3: 达到最大迭代次数({self.state.iteration})")
+        state_iteration = self.cfg.get('state_iteration', 10)
+        if self.state.iteration >= state_iteration:
             return True
         if self.state.sample_ratio >= 0.95 and self.state.feature_ratio >= 0.95:
-            print(f"终止条件4: 样本和特征已用尽({self.state.sample_ratio:.3f})")
             return True
         return False
 
@@ -777,60 +761,46 @@ class RLClustering:
                 step_start_time = time.time()
                 state_vec = self.state.get_state_vector()
                 action = self.agent.select_action(state_vec)
-                print(
-                    f"  [DEBUG] Step {self.state.iteration}: action={action} (0=加样本, 1=加特征), 当前样本数={len(self.selected_samples) if self.selected_samples is not None else 0}")
                 import copy
                 old_state = copy.deepcopy(self.state)
                 start_time = time.time()
                 old_n_samples = len(self.selected_samples)
+                method_map = {
+                    'dbscan': ('run_clustering_sample_dbscan', 'run_clustering_feature_dbscan'),
+                    'cdc': ('run_clustering_sample_cdc', 'run_clustering_feature_cdc'),
+                    'meanshift': ('run_clustering_sample_meanshift', 'run_clustering_feature_meanshift'),
+                    'idec': ('run_clustering_sample_idec', 'run_clustering_feature_idec'),
+                    'hierarchical': ('run_clustering_sample_hierarchical', 'run_clustering_feature_hierarchical'),
+                    'gmm': ('run_clustering_sample_gmm', 'run_clustering_feature_gmm'),
+                    'spectral': ('run_clustering_sample_spectral', 'run_clustering_feature_spectral'),
+                    'birch': ('run_clustering_sample_birch', 'run_clustering_feature_birch'),
+                    'kmeans': ('run_clustering_sample', 'run_clustering_feature'),
+                    'minibatchkmeans': ('run_clustering_sample', 'run_clustering_feature'),
+                }
                 if action == 0:
                     self.add_samples()
                     if len(self.selected_samples) > old_n_samples:
                         new_added = self.selected_samples[old_n_samples:]
-                        if self.method == 'dbscan':
-                            labels, centers = self.run_clustering_sample_dbscan(new_added)
-                        elif self.method == 'cdc':
-                            labels, centers = self.run_clustering_sample_cdc(new_added)
-                        elif self.method == 'meanshift':
-                            labels, centers = self.run_clustering_sample_meanshift(new_added)
-                        elif self.method == 'idec':
-                            labels, centers = self.run_clustering_sample_idec(new_added)
-                        elif self.method == 'hierarchical':
-                            labels, centers = self.run_clustering_sample_hierarchical(new_added)
-                        elif self.method == 'gmm':
-                            labels, centers = self.run_clustering_sample_gmm(new_added)
-                        elif self.method == 'spectral':
-                            labels, centers = self.run_clustering_sample_spectral(new_added)
-                        else:
-                            labels, centers = self.run_clustering_sample(new_added)
+                        sample_fn_name, _ = method_map.get(self.method.lower(), ('run_clustering_sample', 'run_clustering_feature'))
+                        sample_fn = getattr(self, sample_fn_name)
+                        labels, centers = sample_fn(new_added)
                     else:
                         labels, centers = self.current_labels, self.current_centers
                 else:
-                    self.add_features(0.1)
-                    if self.method == 'dbscan':
-                        labels, centers = self.run_clustering_feature_dbscan()
-                    elif self.method == 'cdc':
-                        labels, centers = self.run_clustering_feature_cdc()
-                    elif self.method == 'meanshift':
-                        labels, centers = self.run_clustering_feature_meanshift()
-                    elif self.method == 'hierarchical':
-                        labels, centers = self.run_clustering_feature_hierarchical()
-                    elif self.method == 'gmm':
-                        labels, centers = self.run_clustering_feature_gmm()
-                    elif self.method == 'spectral':
-                        labels, centers = self.run_clustering_feature_spectral()
-                    elif self.method == 'birch':
-                        labels, centers = self.run_clustering_feature_birch()
-                    elif self.method == 'idec':
-                        labels, centers = self.run_clustering_feature_idec()
-                    else:
-                        labels, centers = self.run_clustering_feature()
+                    add_feature_step = self.cfg.get('add_feature_step', 0.1)
+                    self.add_features(add_feature_step)
+                    _, feature_fn_name = method_map.get(self.method.lower(), ('run_clustering_sample', 'run_clustering_feature'))
+                    feature_fn = getattr(self, feature_fn_name)
+                    labels, centers = feature_fn()
                 time_cost = time.time() - start_time
                 self.current_labels = labels
                 self.current_centers = centers
                 self.compute_state_update(labels, centers, time_cost)
                 next_state_vec = self.state.get_state_vector()
-                reward = self.reward_fn.compute_reward(old_state, self.state, action, time_cost)
+                if len(np.unique(labels)) < 2:
+                    reward = -10.0
+                else:
+                    reward = self.reward_fn.compute_reward(old_state, self.state, action, time_cost, labels=labels)
                 episode_reward += reward
                 done = self.check_termination()
                 self.agent.buffer.push(state_vec, action, reward, next_state_vec, done)
@@ -858,7 +828,6 @@ class RLClustering:
                     callback(episode, step_count, self, algo_elapsed_time)
                 step_count += 1
                 if done:
-                    print(f"  Episode {episode + 1} 结束. 总奖励: {episode_reward:.2f}")
                     self.last_episode_features = self.selected_features.copy()
                     break
         self.state.sample_ratio = len(self.selected_samples) / self.X.shape[0]
