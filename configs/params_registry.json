@@ -1,0 +1,21 @@
+{
+  "_default": {
+    "max_episodes": 1,
+    "batch_size": 8,
+    "sh_clusters": 100,
+    "selection_strategy": "random",
+    "feature_method": "pca",
+    "init_sample_ratio": 0.1,
+    "init_feature_ratio": 0.1,
+    "add_sample_step": 0.05,
+    "add_feature_step": 0.05,
+    "target_nmi": 0.1
+  },
+
+  "minibatchkmeans": {
+    "MiniBooNE": {
+      "pca_components": 16,
+      "batch_size": 4,
+      "target_nmi": 0.2110
+    }
+}
