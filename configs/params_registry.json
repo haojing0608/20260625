@@ -18,4 +18,5 @@
       "batch_size": 4,
       "target_nmi": 0.2110
     }
+  }
 }
